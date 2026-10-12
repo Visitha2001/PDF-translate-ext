@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PolyGlot PDF Translator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body class="theme-dark">
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="popup-header">
+      <div class="brand">
+        <div class="logo-box">
+          <img src="../icons/icon32.png" alt="Logo" class="brand-icon">
+        </div>
+        <div class="brand-text">
+          <div class="brand-title">PolyGlot <span class="badge-pro">PDF</span></div>
+          <div class="brand-subtitle">Smart Google Document Translator</div>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="theme-toggle" class="icon-btn" title="Toggle Theme" aria-label="Toggle Theme">
+          <span class="icon-theme">🌙</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="popup-body">
+      <!-- Target Language Card -->
+      <section class="card language-card">
+        <div class="card-label">
+          <span class="label-icon">🌐</span> Target Language
+        </div>
+        <div class="select-wrapper">
+          <select id="target-lang-select" class="custom-select" aria-label="Select Target Language">
+            <!-- Populated dynamically via languages.js -->
+          </select>
+          <span class="select-arrow">▼</span>
+        </div>
+      </section>
+
+      <!-- Primary Action Buttons -->
+      <section class="action-grid">
+        <button id="btn-open-viewer" class="btn btn-primary" title="Launch Translator Studio">
+          <span class="btn-icon">⚡</span>
+          <span class="btn-label">Launch PDF Translator</span>
+        </button>
+        <button id="btn-translate-tab" class="btn btn-secondary" title="Translate current tab if it's a PDF">
+          <span class="btn-icon">📑</span>
+          <span class="btn-label">Translate Active Tab</span>
+        </button>
+      </section>
+
+      <!-- Drag & Drop Zone -->
+      <section id="drop-zone" class="drop-zone" title="Drag and drop any PDF file here">
+        <input type="file" id="file-input" accept="application/pdf" style="display: none;">
+        <div class="drop-content">
+          <div class="drop-icon">📂</div>
+          <div class="drop-text">
+            <strong>Drop PDF here</strong> or <span class="browse-link">Browse files</span>
+          </div>
+          <div class="drop-hint">Instant free translation via Google</div>
+        </div>
+      </section>
+
+      <!-- Sample Document Instant Test -->
+      <div class="sample-test-wrapper">
+        <button id="btn-sample-pdf" class="btn btn-ghost" title="Test with included sample PDF research document">
+          <span>✨ Try Sample Document</span>
+        </button>
+      </div>
+
+      <!-- Quick Text Lookup Accordion -->
+      <section class="card quick-translate-card">
+        <div class="accordion-header" id="quick-toggle">
+          <span class="label-icon">🔍</span>
+          <span class="accordion-title">Quick Text Translator</span>
+          <span class="accordion-chevron">▶</span>
+        </div>
+        <div class="accordion-body" id="quick-body" style="display: none;">
+          <textarea id="quick-input" placeholder="Type or paste text to translate..." rows="2"></textarea>
+          <div class="quick-actions">
+            <button id="btn-quick-translate" class="btn btn-xs btn-primary">Translate</button>
+            <button id="btn-quick-copy" class="btn btn-xs btn-outline" style="display: none;">Copy</button>
+          </div>
+          <div id="quick-output" class="quick-output" style="display: none;"></div>
+        </div>
+      </section>
+
+      <!-- Settings & Preferences -->
+      <section class="card settings-card">
+        <div class="card-label">
+          <span class="label-icon">⚙️</span> Preferences
+        </div>
+        
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-title">Auto-detect Web PDFs</span>
+            <span class="setting-desc">Open web PDFs in Translator</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-autoredirect">
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-title">Floating Translate Button</span>
+            <span class="setting-desc">Show quick pill on web pages</span>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="toggle-floating-btn" checked>
+            <span class="slider"></span>
+          </label>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-title">Default Layout Mode</span>
+            <span class="setting-desc">How translated PDF is displayed</span>
+          </div>
+          <select id="select-viewmode" class="custom-select select-compact">
+            <option value="split">◫ Side-by-Side (Dual)</option>
+            <option value="overlay">☷ In-Place Overlay</option>
+            <option value="bilingual">☰ Interlinear Bilingual</option>
+          </select>
+        </div>
+
+        <div class="setting-item">
+          <div class="setting-info">
+            <span class="setting-title">Translation Engine</span>
+            <span class="setting-desc">100% Free - No API key needed</span>
+          </div>
+          <select id="select-engine" class="custom-select select-compact">
+            <option value="google">Google Translate (Free)</option>
+            <option value="mymemory">MyMemory (Free Backup)</option>
+          </select>
+        </div>
+      </section>
+
+      <!-- Stats Bar -->
+      <footer class="popup-footer">
+        <div class="stat-item">
+          <span class="stat-number" id="stat-words">0</span>
+          <span class="stat-label">Words Translated</span>
+        </div>
+        <div class="stat-divider"></div>
+        <div class="stat-item">
+          <span class="stat-number" id="stat-pages">0</span>
+          <span class="stat-label">Pages Read</span>
+        </div>
+      </footer>
+    </main>
+  </div>
+
+  <script src="../lib/chrome-compat.js"></script>
+  <script src="../lib/languages.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

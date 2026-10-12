@@ -1,0 +1,134 @@
+/* PolyGlot PDF - Content Script Stylesheet */
+
+/* Floating Translate Action Widget */
+.polyglot-float-widget {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.5), 0 0 20px -3px rgba(99, 102, 241, 0.4);
+  border-radius: 9999px;
+  padding: 6px 14px 6px 8px;
+  color: #ffffff;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  animation: polyglotSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  user-select: none;
+}
+
+@keyframes polyglotSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.polyglot-float-widget:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 14px 35px -5px rgba(0, 0, 0, 0.6), 0 0 25px -2px rgba(99, 102, 241, 0.6);
+  border-color: #6366f1;
+}
+
+.polyglot-badge-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6, #06b6d4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4);
+}
+
+.polyglot-widget-label {
+  display: flex;
+  flex-direction: column;
+}
+
+.polyglot-label-main {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: #f8fafc;
+}
+
+.polyglot-label-sub {
+  font-size: 10px;
+  font-weight: 500;
+  color: #94a3b8;
+}
+
+.polyglot-widget-close {
+  background: transparent;
+  border: none;
+  color: #64748b;
+  margin-left: 6px;
+  padding: 2px 4px;
+  border-radius: 50%;
+  font-size: 11px;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.polyglot-widget-close:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* In-Page Selection Tooltip */
+.polyglot-inpage-tooltip {
+  position: absolute;
+  z-index: 2147483647;
+  background: #0f172a;
+  color: #f8fafc;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  box-shadow: 0 12px 30px rgba(0,0,0,0.5);
+  border-radius: 10px;
+  padding: 10px 14px;
+  max-width: 320px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12px;
+  line-height: 1.4;
+  animation: polyglotSlideIn 0.15s ease;
+}
+
+.polyglot-inpage-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  color: #06b6d4;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+
+.polyglot-inpage-text {
+  font-size: 13px;
+  font-weight: 500;
+  color: #ffffff;
+}
+
+.polyglot-inpage-close {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 11px;
+}
