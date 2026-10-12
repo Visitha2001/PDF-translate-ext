@@ -298,6 +298,43 @@ body {
   color: #fff;
 }
 
+/* In-Place Overlay Toggle Button */
+.btn-overlay-toggle {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-app);
+  color: var(--text-sub);
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-overlay-toggle:hover {
+  border-color: var(--border-focus);
+  color: var(--text-main);
+}
+
+.btn-overlay-toggle.active {
+  background: rgba(99, 102, 241, 0.18);
+  border-color: var(--accent-primary);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.35);
+}
+
+.btn-overlay-toggle.active .overlay-toggle-icon {
+  color: var(--accent-cyan);
+}
+
+body.theme-light .btn-overlay-toggle.active {
+  background: rgba(99, 102, 241, 0.12);
+  color: var(--accent-primary);
+}
+
 /* Navigation & Zoom */
 .nav-group, .zoom-group {
   display: flex;
@@ -704,7 +741,7 @@ canvas.pdf-canvas {
   background: rgba(99, 102, 241, 0.45);
 }
 
-/* Overlay Layer (Mode: Overlay) */
+/* Overlay Layer (Mode: Overlay & In-Place Overlay) */
 .overlay-layer {
   position: absolute;
   top: 0;
@@ -713,42 +750,60 @@ canvas.pdf-canvas {
   bottom: 0;
   pointer-events: none;
   overflow: hidden;
+  transition: opacity 0.2s ease;
+}
+
+body.overlay-hidden .overlay-layer {
+  display: none !important;
 }
 
 .overlay-chip {
   position: absolute;
-  background: rgba(17, 24, 39, 0.88);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #67e8f9;
-  border: 1px solid rgba(103, 232, 249, 0.3);
+  border: 1px solid rgba(103, 232, 249, 0.4);
   border-radius: 3px;
-  padding: 1px 3px;
+  padding: 1px 4px;
   font-size: 11px;
-  line-height: 1.2;
+  line-height: 1.25;
   box-sizing: border-box;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   pointer-events: auto;
   cursor: pointer;
-  transition: transform 0.1s ease, z-index 0.1s;
+  z-index: 10;
+  transition: transform 0.12s ease, z-index 0.12s ease, max-width 0.15s ease;
 }
 
 body.theme-light .overlay-chip {
-  background: rgba(255, 255, 255, 0.92);
-  color: #1e3a8a;
-  border-color: rgba(30, 58, 138, 0.3);
+  background: rgba(255, 255, 255, 0.95);
+  color: #0369a1;
+  border-color: rgba(3, 105, 161, 0.35);
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
 }
 
 body.theme-sepia .overlay-chip {
-  background: rgba(253, 246, 227, 0.95);
-  color: #7c2d12;
-  border-color: rgba(124, 45, 18, 0.3);
+  background: rgba(254, 243, 199, 0.96);
+  color: #78350f;
+  border-color: rgba(120, 53, 15, 0.35);
 }
 
 .overlay-chip:hover {
+  white-space: normal;
+  max-width: 400px !important;
+  max-height: none !important;
   transform: scale(1.03);
-  z-index: 50;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 1000;
+  background: rgba(15, 23, 42, 0.98);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.6);
+}
+
+body.theme-light .overlay-chip:hover {
+  background: #ffffff;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
 }
 
 /* Translated Pane (Side-by-Side View) */
@@ -828,6 +883,7 @@ body.theme-sepia .overlay-chip {
 
 table.translated-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
@@ -844,7 +900,9 @@ table.translated-table th {
   letter-spacing: 0.04em;
   padding: 10px 14px;
   border-bottom: 2px solid var(--border-app);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 body.theme-light table.translated-table th {
@@ -863,6 +921,8 @@ table.translated-table td {
   color: var(--text-main);
   transition: background 0.15s ease;
   user-select: text;
+  word-break: break-word;
+  overflow-wrap: break-word;
 }
 
 table.translated-table tr:last-child td {
@@ -875,6 +935,15 @@ table.translated-table tr:hover td {
 
 body.theme-light table.translated-table tr:hover td {
   background: rgba(99, 102, 241, 0.05);
+}
+
+/* Visually Separated Lines (Subtitles, Metadata, Footnotes) */
+.translated-line {
+  margin: 4px 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-sub);
+  user-select: text;
 }
 
 /* Bullet Points & Lists */

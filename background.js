@@ -196,9 +196,8 @@ async function batchTranslate(texts, sourceLang = 'auto', targetLang = 'es', eng
     return results;
   }
 
-  // Group into batches of ~2500 characters
+  // Group into batches of ~2500 characters with robust [[#]] delimiters
   const BATCH_LIMIT = 2500;
-  const DELIMITER = '\n\n⟦§⟧\n\n';
   const batches = [];
   let currentBatch = [];
   let currentLen = 0;
@@ -212,24 +211,33 @@ async function batchTranslate(texts, sourceLang = 'auto', targetLang = 'es', eng
       currentLen = 0;
     }
     currentBatch.push({ text, index: originalIndex });
-    currentLen += text.length + DELIMITER.length;
+    currentLen += text.length + 20;
   }
   if (currentBatch.length > 0) {
     batches.push(currentBatch);
   }
 
-  // Execute batch requests concurrently (up to 4 in parallel)
+  // Execute batch requests concurrently
   const batchPromises = batches.map(async (batch) => {
-    const combinedText = batch.map(item => item.text).join(DELIMITER);
+    // Join with index markers: Item0 + '\n\n[[1]]\n\n' + Item1...
+    let combinedText = '';
+    batch.forEach((item, idx) => {
+      if (idx === 0) {
+        combinedText += item.text;
+      } else {
+        combinedText += `\n\n[[${idx}]]\n\n` + item.text;
+      }
+    });
+
     try {
       const translatedCombined = await translateText(combinedText, sourceLang, targetLang, engine);
-      const splitTranslations = (translatedCombined.translation || '').split(/⟦§⟧/);
+      const splitTranslations = (translatedCombined.translation || '').split(/\[\[\d+\]\]/);
 
       if (splitTranslations.length === batch.length) {
         batch.forEach((item, i) => {
           const trans = splitTranslations[i].trim();
           const itemResult = {
-            translation: trans,
+            translation: trans || item.text,
             detectedLang: translatedCombined.detectedLang || sourceLang
           };
           results[item.index] = itemResult;
@@ -238,7 +246,7 @@ async function batchTranslate(texts, sourceLang = 'auto', targetLang = 'es', eng
         return;
       }
     } catch (e) {
-      console.warn('Batch delimiter matching failed or network error, falling back to item-by-item:', e);
+      console.warn('Batch delimiter matching failed, falling back to item-by-item:', e);
     }
 
     // Fallback: individual translations for this batch

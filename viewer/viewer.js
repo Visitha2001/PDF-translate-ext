@@ -20,8 +20,9 @@ class PolyGlotViewer {
     this.targetLang = 'es';
     this.engine = 'google';
     this.theme = 'dark';
+    this.overlayEnabled = true;
     
-    // Page translation store: pageNum => { blocks: [{ text, trans, isHeading, box }], fullTrans: string }
+    // Page translation store: pageNum => { blocks: [...], fullTrans: string }
     this.translations = new Map();
     this.pageRenderTasks = new Map();
     this.isTranslatingDoc = false;
@@ -63,6 +64,10 @@ class PolyGlotViewer {
     this.btnEmptyOpen = document.getElementById('btn-empty-open');
     this.btnEmptySample = document.getElementById('btn-empty-sample');
 
+    // In-Place Overlay Toggle Button
+    this.btnToggleOverlay = document.getElementById('btn-toggle-overlay');
+    this.overlayToggleText = document.getElementById('overlay-toggle-text');
+
     // Progress Bar
     this.progressContainer = document.getElementById('translation-progress-bar-container');
     this.progressStatusText = document.getElementById('progress-status-text');
@@ -96,7 +101,8 @@ class PolyGlotViewer {
       sourceLang: 'auto',
       engine: 'google',
       viewMode: 'split',
-      theme: 'dark'
+      theme: 'dark',
+      overlayEnabled: true
     });
 
     this.targetLang = settings.targetLang || 'es';
@@ -114,9 +120,31 @@ class PolyGlotViewer {
 
     this.applyTheme(this.theme);
     this.setViewMode(this.activeMode);
+    this.setOverlayState(settings.overlayEnabled !== false);
+  }
+
+  setOverlayState(enabled) {
+    this.overlayEnabled = enabled;
+    if (enabled) {
+      document.body.classList.remove('overlay-hidden');
+      if (this.btnToggleOverlay) this.btnToggleOverlay.classList.add('active');
+      if (this.overlayToggleText) this.overlayToggleText.textContent = 'Overlay: ON';
+    } else {
+      document.body.classList.add('overlay-hidden');
+      if (this.btnToggleOverlay) this.btnToggleOverlay.classList.remove('active');
+      if (this.overlayToggleText) this.overlayToggleText.textContent = 'Overlay: OFF';
+    }
+    chrome.storage.local.set({ overlayEnabled: enabled });
   }
 
   initEventListeners() {
+    // In-Place Overlay Toggle Click
+    if (this.btnToggleOverlay) {
+      this.btnToggleOverlay.addEventListener('click', () => {
+        this.setOverlayState(!this.overlayEnabled);
+      });
+    }
+
     // Mode switcher buttons
     document.querySelectorAll('.mode-btn').forEach(btn => {
       btn.addEventListener('click', (e) => {
@@ -244,6 +272,9 @@ class PolyGlotViewer {
       } else if (e.altKey && (e.key === 't' || e.key === 'T')) {
         e.preventDefault();
         this.translateCurrentPage();
+      } else if (e.altKey && (e.key === 'o' || e.key === 'O')) {
+        e.preventDefault();
+        this.setOverlayState(!this.overlayEnabled);
       } else if (e.key === 'Escape') {
         this.hidePopover();
       }
@@ -578,7 +609,23 @@ class PolyGlotViewer {
     });
   }
 
-  // Extract rich document structure (Tables, Bullet points, Headings, Paragraphs)
+  // Cluster X coordinates across items to determine table column centroids
+  clusterColumns(items, minColGap = 25) {
+    const sortedX = items.map(it => it.x).sort((a, b) => a - b);
+    const clusters = [];
+    for (const x of sortedX) {
+      let matched = clusters.find(c => Math.abs(c.mean - x) <= minColGap);
+      if (!matched) {
+        clusters.push({ mean: x, points: [x] });
+      } else {
+        matched.points.push(x);
+        matched.mean = matched.points.reduce((s, p) => s + p, 0) / matched.points.length;
+      }
+    }
+    return clusters.sort((a, b) => a.mean - b.mean).map(c => c.mean);
+  }
+
+  // Extract rich document structure (Tables, Bullet points, Headings, Separated Lines, Paragraphs)
   async extractPageStructure(pageNum) {
     const page = await this.pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
@@ -619,7 +666,7 @@ class PolyGlotViewer {
     let currentLine = null;
 
     for (const item of rawItems) {
-      if (!currentLine || Math.abs(item.y - currentLine.y) > Math.max(3.5, item.height * 0.4)) {
+      if (!currentLine || Math.abs(item.y - currentLine.y) > Math.max(3.5, item.height * 0.45)) {
         if (currentLine) lines.push(currentLine);
         currentLine = {
           y: item.y,
@@ -633,92 +680,60 @@ class PolyGlotViewer {
     }
     if (currentLine) lines.push(currentLine);
 
-    // Step 4: Within each line, cluster adjacent words into cells/segments
-    // Detect column boundaries: if two items have gap > max(20, fontH * 1.5), they belong to different columns!
+    // Step 4: Within each line, segment adjacent words into cells/segments
+    // A horizontal gap > 6.0px is a separate column/cell; smaller gaps belong to the same phrase
     const structuredLines = lines.map(line => {
       line.items.sort((a, b) => a.x - b.x);
-      const cells = [];
-      let currentCell = null;
+      const segments = [];
+      let curSeg = null;
 
-      for (const item of line.items) {
-        const itemStr = item.str;
-        if (!currentCell) {
-          currentCell = {
-            text: itemStr,
-            x: item.x,
-            y: item.y,
-            width: item.width,
-            height: item.height,
-            endX: item.x + item.width
-          };
+      for (const it of line.items) {
+        if (!curSeg) {
+          curSeg = { ...it };
         } else {
-          const gap = item.x - currentCell.endX;
-          // Substantial horizontal gap means a new table cell/column!
-          if (gap > Math.max(20, item.height * 1.5)) {
-            cells.push({
-              text: currentCell.text.trim(),
-              x: currentCell.x,
-              y: currentCell.y,
-              width: currentCell.width,
-              height: currentCell.height
-            });
-            currentCell = {
-              text: itemStr,
-              x: item.x,
-              y: item.y,
-              width: item.width,
-              height: item.height,
-              endX: item.x + item.width
-            };
+          const gap = it.x - (curSeg.x + curSeg.width);
+          if (gap > 6.0) {
+            segments.push(curSeg);
+            curSeg = { ...it };
           } else {
-            // Same cell/phrase: append space if needed
-            const needsSpace = !currentCell.text.endsWith(' ') && !itemStr.startsWith(' ');
-            currentCell.text += (needsSpace ? ' ' : '') + itemStr;
-            currentCell.width = (item.x + item.width) - currentCell.x;
-            currentCell.endX = item.x + item.width;
-            currentCell.height = Math.max(currentCell.height, item.height);
+            const needsSpace = !curSeg.str.endsWith(' ') && !it.str.startsWith(' ');
+            curSeg.str += (needsSpace ? ' ' : '') + it.str;
+            curSeg.width = (it.x + it.width) - curSeg.x;
+            curSeg.height = Math.max(curSeg.height, it.height);
           }
         }
       }
-      if (currentCell && currentCell.text.trim()) {
-        cells.push({
-          text: currentCell.text.trim(),
-          x: currentCell.x,
-          y: currentCell.y,
-          width: currentCell.width,
-          height: currentCell.height
-        });
+      if (curSeg && curSeg.str.trim()) {
+        segments.push(curSeg);
       }
       return {
         y: line.y,
         height: line.height,
-        cells
+        segments
       };
     });
 
-    // Step 5: Group lines into Structural Blocks (Tables, Bullet points, Headings, Paragraphs)
+    // Step 5: Group lines into Structural Blocks (Tables, Bullet points, Headings, Separated Lines, Paragraphs)
     const blocks = [];
     let i = 0;
 
-    // Bullet detection regex
+    // Bullet and numbered list detection regex
     const bulletRegex = /^(\x95|[\u2022\u25cf\u25cb\u25a0\u25aa\u25ba\u2192\-\*–—]|(\d+|[a-zA-Z]|\([0-9a-zA-Z]+\))[\.\)])\s*(.*)$/;
 
     while (i < structuredLines.length) {
-      const line = structuredLines[i];
+      const sl = structuredLines[i];
 
-      // Check for Table: 2 or more cells in this line
-      if (line.cells.length >= 2) {
-        // Look ahead to see if subsequent lines also have 2+ cells
-        const tableLines = [line];
+      // Check for Table: 2 or more segments in this line
+      if (sl.segments.length >= 2) {
+        const tableLines = [sl];
         let j = i + 1;
         while (j < structuredLines.length) {
           const nextLine = structuredLines[j];
-          const verticalGap = nextLine.y - tableLines[tableLines.length - 1].y;
+          const vertGap = nextLine.y - tableLines[tableLines.length - 1].y;
 
-          // If too far vertically, table ends
-          if (verticalGap > 45 || verticalGap > (line.height * 3.5)) break;
+          if (vertGap > 38 || vertGap > (sl.height * 3.5)) break;
 
-          if (nextLine.cells.length >= 2) {
+          if (nextLine.segments.length >= 2) {
             tableLines.push(nextLine);
             j++;
           } else {
@@ -728,32 +743,67 @@ class PolyGlotViewer {
 
         // If we found at least 2 consecutive multi-cell lines, it's a TABLE!
         if (tableLines.length >= 2) {
-          const rows = tableLines.map(l => {
-            return l.cells.map(c => ({
-              text: c.text,
+          const allSegs = tableLines.flatMap(tl => tl.segments);
+          const colCentroids = this.clusterColumns(allSegs, 26);
+          const tableX = Math.min(...colCentroids);
+          const tableMaxX = Math.max(...allSegs.map(s => s.x + s.width));
+          const totalTableWidth = Math.max(100, tableMaxX - tableX);
+
+          // Calculate column widths in percentages
+          const colWidths = [];
+          for (let c = 0; c < colCentroids.length; c++) {
+            const nextX = c < colCentroids.length - 1 ? colCentroids[c + 1] : tableMaxX + 15;
+            colWidths.push(Math.max(12, ((nextX - colCentroids[c]) / totalTableWidth) * 100));
+          }
+          const sumW = colWidths.reduce((a, b) => a + b, 0);
+          const normColWidths = colWidths.map(w => (w / sumW) * 100);
+
+          // Map each row strictly to fixed column slots
+          const rows = tableLines.map(tl => {
+            const rowSlots = new Array(colCentroids.length).fill(null).map((_, cIdx) => ({
+              text: '',
               translation: '',
+              colIndex: cIdx,
               box: {
-                x: (c.x / viewport.width) * 100,
-                y: (c.y / viewport.height) * 100,
-                width: (c.width / viewport.width) * 100,
-                height: (c.height / viewport.height) * 100
+                x: (colCentroids[cIdx] / viewport.width) * 100,
+                y: (tl.y / viewport.height) * 100,
+                width: ((viewport.width * (normColWidths[cIdx] / 100) * 0.95) / viewport.width) * 100,
+                height: (tl.height / viewport.height) * 100
               }
             }));
-          });
 
-          const tableX = Math.min(...tableLines.flatMap(l => l.cells.map(c => c.x)));
-          const tableY = tableLines[0].y;
-          const tableMaxX = Math.max(...tableLines.flatMap(l => l.cells.map(c => c.x + c.width)));
-          const tableMaxY = tableLines[tableLines.length - 1].y + tableLines[tableLines.length - 1].height;
+            tl.segments.forEach(seg => {
+              let closestCol = 0;
+              let minDist = Math.abs(seg.x - colCentroids[0]);
+              for (let c = 1; c < colCentroids.length; c++) {
+                const dist = Math.abs(seg.x - colCentroids[c]);
+                if (dist < minDist) {
+                  minDist = dist;
+                  closestCol = c;
+                }
+              }
+              const slot = rowSlots[closestCol];
+              if (!slot.text) {
+                slot.text = seg.str;
+                slot.box.x = (seg.x / viewport.width) * 100;
+                slot.box.width = (seg.width / viewport.width) * 100;
+              } else {
+                slot.text += ' ' + seg.str;
+                slot.box.width = ((seg.x + seg.width - (slot.box.x * viewport.width / 100)) / viewport.width) * 100;
+              }
+            });
+            return rowSlots;
+          });
 
           blocks.push({
             type: 'table',
             rows,
+            colWidths: normColWidths,
             box: {
               x: (tableX / viewport.width) * 100,
-              y: (tableY / viewport.height) * 100,
+              y: (tableLines[0].y / viewport.height) * 100,
               width: ((tableMaxX - tableX) / viewport.width) * 100,
-              height: ((tableMaxY - tableY) / viewport.height) * 100
+              height: ((tableLines[tableLines.length - 1].y + tableLines[tableLines.length - 1].height - tableLines[0].y) / viewport.height) * 100
             }
           });
 
@@ -762,79 +812,109 @@ class PolyGlotViewer {
         }
       }
 
-      // Check for List Item (Bullet point or Numbered point)
-      const fullLineText = line.cells.map(c => c.text).join(' ');
-      const bulletMatch = fullLineText.match(bulletRegex);
+      const fullText = sl.segments.map(s => s.str).join(' ').trim();
 
-      if (bulletMatch) {
-        const bulletMarker = bulletMatch[1];
-        const contentText = bulletMatch[3].trim();
-        const firstCell = line.cells[0];
-
-        blocks.push({
-          type: 'list_item',
-          bullet: bulletMarker,
-          text: contentText || fullLineText,
-          originalFullText: fullLineText,
-          translation: '',
-          box: {
-            x: (firstCell.x / viewport.width) * 100,
-            y: (firstCell.y / viewport.height) * 100,
-            width: (line.cells.reduce((sum, c) => sum + c.width, 0) / viewport.width) * 100,
-            height: (line.height / viewport.height) * 100
-          }
-        });
-        i++;
-        continue;
-      }
-
-      // Check for Heading
-      const isHeading = line.height >= 13 || (line.height > 11 && line.cells.length === 1 && fullLineText.length < 75);
-      if (isHeading) {
-        const firstCell = line.cells[0];
+      // Heading detection (larger font size)
+      const isTitle = sl.height >= 16;
+      const isHeading = sl.height >= 12 || (sl.height > 10.5 && fullText.length < 65 && !fullText.endsWith('.'));
+      if (isTitle || isHeading) {
         blocks.push({
           type: 'heading',
-          level: line.height > 15 ? 1 : 2,
-          text: fullLineText,
+          level: isTitle ? 1 : 2,
+          text: fullText,
           translation: '',
           box: {
-            x: (firstCell.x / viewport.width) * 100,
-            y: (firstCell.y / viewport.height) * 100,
-            width: (line.cells.reduce((sum, c) => sum + c.width, 0) / viewport.width) * 100,
-            height: (line.height / viewport.height) * 100
+            x: (sl.segments[0].x / viewport.width) * 100,
+            y: (sl.y / viewport.height) * 100,
+            width: (sl.segments.reduce((s, seg) => s + seg.width, 0) / viewport.width) * 100,
+            height: (sl.height / viewport.height) * 100
           }
         });
         i++;
         continue;
       }
 
-      // Standard Paragraph: merge adjacent body lines
-      let paragraphText = fullLineText;
-      let startLine = line;
-      let lastLine = line;
+      // List Item detection (Bullet point or Numbered sequence)
+      const bulletMatch = fullText.match(bulletRegex);
+      if (bulletMatch) {
+        blocks.push({
+          type: 'list_item',
+          bullet: bulletMatch[1],
+          text: bulletMatch[3].trim() || fullText,
+          originalFullText: fullText,
+          translation: '',
+          box: {
+            x: (sl.segments[0].x / viewport.width) * 100,
+            y: (sl.y / viewport.height) * 100,
+            width: (sl.segments.reduce((s, seg) => s + seg.width, 0) / viewport.width) * 100,
+            height: (sl.height / viewport.height) * 100
+          }
+        });
+        i++;
+        continue;
+      }
+
+      // Check if this line is a standalone visually separated line (e.g. subtitle, footer, caption)
+      const isStandalone = fullText.length < 75 && (
+        fullText.toLowerCase().includes('page ') ||
+        fullText.includes(' - ') ||
+        fullText.endsWith(':') ||
+        sl.height > 10.5
+      );
+
+      if (isStandalone) {
+        blocks.push({
+          type: 'line',
+          text: fullText,
+          translation: '',
+          box: {
+            x: (sl.segments[0].x / viewport.width) * 100,
+            y: (sl.y / viewport.height) * 100,
+            width: (sl.segments.reduce((s, seg) => s + seg.width, 0) / viewport.width) * 100,
+            height: (sl.height / viewport.height) * 100
+          }
+        });
+        i++;
+        continue;
+      }
+
+      // Standard Flowing Paragraph: merge consecutive wrapping lines
+      let paraText = fullText;
+      let startLine = sl;
+      let lastLine = sl;
       let j = i + 1;
 
       while (j < structuredLines.length) {
         const nextLine = structuredLines[j];
-        const verticalGap = nextLine.y - lastLine.y;
-        const nextText = nextLine.cells.map(c => c.text).join(' ');
+        const vertGap = nextLine.y - lastLine.y;
+        const nextText = nextLine.segments.map(s => s.str).join(' ').trim();
 
-        // Stop paragraph if next line is table, bullet, heading, or large vertical gap
-        if (nextLine.cells.length >= 2 || nextText.match(bulletRegex) || nextLine.height >= 13 || verticalGap > (line.height * 2.2)) {
+        if (
+          nextLine.segments.length >= 2 ||
+          nextLine.height >= 12 ||
+          nextText.match(bulletRegex) ||
+          vertGap > (sl.height * 1.85) ||
+          nextText.toLowerCase().includes('page ') ||
+          nextText.includes(' - ')
+        ) {
           break;
         }
 
-        paragraphText += ' ' + nextText;
+        if (paraText.endsWith('.') && vertGap > (sl.height * 1.35)) {
+          break;
+        }
+
+        paraText += ' ' + nextText;
         lastLine = nextLine;
         j++;
       }
 
       blocks.push({
         type: 'paragraph',
-        text: paragraphText.trim(),
+        text: paraText.trim(),
         translation: '',
         box: {
-          x: (startLine.cells[0].x / viewport.width) * 100,
+          x: (startLine.segments[0].x / viewport.width) * 100,
           y: (startLine.y / viewport.height) * 100,
           width: 90,
           height: ((lastLine.y + lastLine.height - startLine.y) / viewport.height) * 100
@@ -896,7 +976,7 @@ class PolyGlotViewer {
             block.translation = block.originalFullText;
           }
         } else {
-          // heading or paragraph
+          // heading, line, or paragraph
           if (block.text && block.text.trim()) {
             translationRequests.push({
               text: block.text.trim(),
@@ -963,11 +1043,19 @@ class PolyGlotViewer {
       translatedContent.innerHTML = '';
       blocks.forEach((block) => {
         if (block.type === 'table') {
-          // Render Table
+          // Render Table with strict column colgroup
           const tableWrapper = document.createElement('div');
           tableWrapper.className = 'translated-table-wrapper';
           
           let tableHtml = '<table class="translated-table">';
+          if (Array.isArray(block.colWidths) && block.colWidths.length > 0) {
+            tableHtml += '<colgroup>';
+            block.colWidths.forEach(w => {
+              tableHtml += `<col style="width: ${w.toFixed(1)}%;">`;
+            });
+            tableHtml += '</colgroup>';
+          }
+
           if (block.rows.length > 0) {
             // Header Row (Row 0)
             tableHtml += '<thead><tr>';
@@ -1041,6 +1129,24 @@ class PolyGlotViewer {
           }
           translatedContent.appendChild(headEl);
 
+        } else if (block.type === 'line') {
+          // Render Visually Separated Line (Subtitle, Footnote, Section note)
+          const content = block.translation || block.text;
+          const lineEl = document.createElement('div');
+          lineEl.className = 'translated-line';
+
+          if (this.activeMode === 'bilingual') {
+            lineEl.innerHTML = `
+              <div class="bilingual-pair">
+                <div class="bilingual-original">${this.escapeHtml(block.text)}</div>
+                <div class="bilingual-translated">${this.escapeHtml(content)}</div>
+              </div>
+            `;
+          } else {
+            lineEl.textContent = content;
+          }
+          translatedContent.appendChild(lineEl);
+
         } else {
           // Standard Paragraph
           const content = block.translation || block.text;
@@ -1062,7 +1168,7 @@ class PolyGlotViewer {
       });
     }
 
-    // Render Overlay Chips in Overlay Mode
+    // Render Overlay Chips in Overlay Layer
     if (overlayLayer) {
       overlayLayer.innerHTML = '';
       blocks.forEach(block => {
@@ -1070,14 +1176,14 @@ class PolyGlotViewer {
           // Place overlay chips for EACH table cell in the exact cell bounding box
           block.rows.forEach(row => {
             row.forEach(cell => {
-              if (!cell.box) return;
+              if (!cell.text || !cell.box) return;
               const chip = document.createElement('div');
               chip.className = 'overlay-chip';
               chip.textContent = cell.translation || cell.text;
               chip.title = `Original: ${cell.text}`;
-              chip.style.left = `${Math.max(1, cell.box.x)}%`;
-              chip.style.top = `${Math.max(1, cell.box.y)}%`;
-              chip.style.maxWidth = `${Math.min(95, cell.box.width + 12)}%`;
+              chip.style.left = `${Math.max(0.5, cell.box.x)}%`;
+              chip.style.top = `${Math.max(0.5, cell.box.y)}%`;
+              chip.style.maxWidth = `${Math.min(95, cell.box.width + 10)}%`;
               overlayLayer.appendChild(chip);
             });
           });
@@ -1087,8 +1193,8 @@ class PolyGlotViewer {
           chip.className = 'overlay-chip';
           chip.textContent = `${block.bullet} ${block.translation || block.text}`;
           chip.title = `Original: ${block.originalFullText || block.text}`;
-          chip.style.left = `${Math.max(1, block.box.x)}%`;
-          chip.style.top = `${Math.max(1, block.box.y)}%`;
+          chip.style.left = `${Math.max(0.5, block.box.x)}%`;
+          chip.style.top = `${Math.max(0.5, block.box.y)}%`;
           chip.style.maxWidth = `${Math.min(95, block.box.width + 8)}%`;
           overlayLayer.appendChild(chip);
         } else {
@@ -1097,9 +1203,9 @@ class PolyGlotViewer {
           chip.className = 'overlay-chip';
           chip.textContent = block.translation || block.text;
           chip.title = `Original: ${block.text}`;
-          chip.style.left = `${Math.max(1, block.box.x)}%`;
-          chip.style.top = `${Math.max(1, block.box.y)}%`;
-          chip.style.maxWidth = `${Math.min(95, block.box.width + 10)}%`;
+          chip.style.left = `${Math.max(0.5, block.box.x)}%`;
+          chip.style.top = `${Math.max(0.5, block.box.y)}%`;
+          chip.style.maxWidth = `${Math.min(95, Math.max(35, block.box.width + 10))}%`;
           overlayLayer.appendChild(chip);
         }
       });
