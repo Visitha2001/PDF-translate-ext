@@ -783,13 +783,135 @@ body.theme-sepia .overlay-chip {
   background: rgba(99, 102, 241, 0.1);
 }
 
-.translated-block.is-heading {
-  font-size: 18px;
-  font-weight: 700;
-  border-left-width: 4px;
-  border-left-color: var(--accent-cyan);
+.translated-paragraph {
+  margin: 4px 0;
+  line-height: 1.65;
   color: var(--text-main);
-  margin-top: 8px;
+  user-select: text;
+}
+
+/* Headings */
+.translated-heading {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-main);
+  margin-top: 12px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-app);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  user-select: text;
+}
+
+.translated-heading.is-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+  border-bottom: 2px solid var(--accent-primary);
+  padding-bottom: 6px;
+  margin-top: 4px;
+}
+
+/* Table Preservation Styles */
+.translated-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  margin: 10px 0 14px 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-app);
+  background: var(--bg-card);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+table.translated-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+table.translated-table th {
+  background: var(--bg-panel);
+  color: var(--accent-cyan);
+  font-weight: 700;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--border-app);
+  white-space: nowrap;
+}
+
+body.theme-light table.translated-table th {
+  color: #0369a1;
+  background: #f1f5f9;
+}
+
+body.theme-sepia table.translated-table th {
+  color: #92400e;
+  background: #fef3c7;
+}
+
+table.translated-table td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--border-app);
+  color: var(--text-main);
+  transition: background 0.15s ease;
+  user-select: text;
+}
+
+table.translated-table tr:last-child td {
+  border-bottom: none;
+}
+
+table.translated-table tr:hover td {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+body.theme-light table.translated-table tr:hover td {
+  background: rgba(99, 102, 241, 0.05);
+}
+
+/* Bullet Points & Lists */
+.translated-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 4px 8px;
+  margin: 3px 0;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+  user-select: text;
+}
+
+.translated-list-item:hover {
+  background: rgba(99, 102, 241, 0.06);
+}
+
+.bullet-marker {
+  font-weight: 800;
+  color: var(--accent-cyan);
+  min-width: 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+body.theme-light .bullet-marker {
+  color: var(--accent-primary);
+}
+
+.list-item-content {
+  flex: 1;
+  line-height: 1.6;
+  font-size: 13.5px;
+  color: var(--text-main);
 }
 
 .translated-empty {
@@ -848,6 +970,25 @@ body.mode-bilingual .pane-translated {
 
 .bilingual-translated {
   font-size: 14px;
+  font-weight: 500;
+  color: var(--text-main);
+}
+
+.bilingual-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bilingual-cell-orig {
+  font-size: 11px;
+  color: var(--text-dim);
+  border-bottom: 1px dotted var(--border-app);
+  padding-bottom: 2px;
+}
+
+.bilingual-cell-trans {
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-main);
 }

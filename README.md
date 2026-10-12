@@ -13,13 +13,18 @@ Designed with a sleek glassmorphic UI, high-fidelity PDF layout preservation, mu
 - **Secondary Fallback**: Free MyMemory Translation API to guarantee high availability without rate limits.
 - Supports **45+ major global languages** with auto-detection of source language.
 
-### 2. Versatile Reading Modes
-- **◫ Dual Side-by-Side View**: Original PDF page on the left, translated page with matching formatting and layout on the right. Synchronized page tracking.
-- **☷ In-Place Overlay Mode**: Seamless semi-translucent glass translated chips rendered directly above original text spans.
-- **☰ Interlinear Bilingual Mode**: Original sentences followed directly by translated sentences for language learners and researchers.
+### 2. Intelligent Layout & Table Preservation
+- **True Table Grid Reconstruction**: Automatically detects multi-column tabular data in the PDF. Renders a matching HTML `<table>` with headers (`<th>`) and rows (`<td>`) holding translated content in their exact cells.
+- **Bullet & Numbered Lists**: Automatically detects bullet symbols (`•`, `–`, `*`, `\x95`) and ordered numbering (`1.`, `2.`), rendering them as indented list items with preserved bullet markers.
+- **Heading Hierarchy**: Preserves section titles and subheadings with proportionate typography and styling.
+
+### 3. Versatile Reading Modes
+- **◫ Dual Side-by-Side View**: Original PDF page on the left, translated page with matching tables, lists, and layout on the right. Synchronized page tracking.
+- **☷ In-Place Overlay Mode**: Seamless semi-translucent glass translated chips rendered directly above original text spans, placing each translated cell directly over its original table cell on the PDF canvas.
+- **☰ Interlinear Bilingual Mode**: Original sentences followed directly by translated sentences (including bilingual table cells) for language learners and researchers.
 - **📄 Original Document View**: High-fidelity PDF rendering with full text selection.
 
-### 3. Interactive Reading & Tools
+### 4. Interactive Reading & Tools
 - **Text Selection Popover**: Highlight any phrase or paragraph in the PDF to summon an instant Google Translate card with:
   - 🔊 **Text-to-Speech (TTS)** audio pronunciation in the target language.
   - 📋 **One-click Copy**.
@@ -28,7 +33,7 @@ Designed with a sleek glassmorphic UI, high-fidelity PDF layout preservation, mu
 - **Theme Modes**: Dark (Obsidian Glass), Light (Clean Paper), and Sepia (Warm Reader).
 - **Document Export**: Download translated text as `.txt`, structured `.md` (Markdown), or print/save as translated PDF (`Ctrl+P`).
 
-### 4. Seamless In-Browser Integration
+### 5. Seamless In-Browser Integration
 - **Floating Quick Pill**: Injected automatically onto web pages containing PDFs or PDF embeds. Click `[ 🌐 Translate PDF ]` to launch the translator.
 - **Context Menus**: Right-click on any PDF link or selected text to open in PolyGlot.
 - **Local PDF Support**: Drag and drop any PDF file from your computer or browse to open it instantly.

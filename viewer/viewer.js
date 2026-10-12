@@ -578,8 +578,8 @@ class PolyGlotViewer {
     });
   }
 
-  // Extract smart paragraphs from page text items
-  async extractPageParagraphs(pageNum) {
+  // Extract rich document structure (Tables, Bullet points, Headings, Paragraphs)
+  async extractPageStructure(pageNum) {
     const page = await this.pdfDoc.getPage(pageNum);
     const textContent = await page.getTextContent();
     const viewport = page.getViewport({ scale: 1.0 });
@@ -588,86 +588,266 @@ class PolyGlotViewer {
       return [];
     }
 
-    // Sort items by vertical position (Y descending in PDF, top to bottom), then X ascending
-    const sorted = [...textContent.items].sort((a, b) => {
-      const diffY = b.transform[5] - a.transform[5];
-      if (Math.abs(diffY) > 4) return diffY;
-      return a.transform[4] - b.transform[4];
+    // Step 1: Normalize coordinates (y from top of page = viewport.height - ty)
+    const rawItems = textContent.items
+      .filter(item => item.str && item.str.trim())
+      .map(item => {
+        const fontH = item.height || 10;
+        const normY = viewport.height - item.transform[5];
+        const normX = item.transform[4];
+        return {
+          str: item.str,
+          x: normX,
+          y: normY,
+          width: item.width || (item.str.length * fontH * 0.5),
+          height: fontH,
+          fontName: item.fontName || ''
+        };
+      });
+
+    if (rawItems.length === 0) return [];
+
+    // Step 2: Sort items from top to bottom (y ascending), then left to right (x ascending)
+    rawItems.sort((a, b) => {
+      const diffY = a.y - b.y;
+      if (Math.abs(diffY) > 3.5) return diffY;
+      return a.x - b.x;
     });
 
-    const blocks = [];
-    let currentBlock = {
-      text: '',
-      isHeading: false,
-      lastY: null,
-      lastX: null,
-      height: 12,
-      x: 0,
-      y: 0,
-      width: 0
-    };
+    // Step 3: Cluster items into lines
+    const lines = [];
+    let currentLine = null;
 
-    for (const item of sorted) {
-      const str = item.str.trim();
-      if (!str) continue;
-
-      const y = item.transform[5];
-      const x = item.transform[4];
-      const fontHeight = item.height || 12;
-
-      // Detect if this starts a new paragraph or heading
-      const isNewParagraph = currentBlock.lastY !== null && Math.abs(currentBlock.lastY - y) > (fontHeight * 1.6);
-      const isLargeFont = fontHeight > 14;
-
-      if (isNewParagraph || (currentBlock.isHeading && !isLargeFont)) {
-        if (currentBlock.text.trim()) {
-          blocks.push({
-            text: currentBlock.text.trim(),
-            isHeading: currentBlock.isHeading,
-            box: {
-              x: (currentBlock.x / viewport.width) * 100,
-              y: ((viewport.height - currentBlock.y) / viewport.height) * 100,
-              width: (currentBlock.width / viewport.width) * 100,
-              height: (currentBlock.height / viewport.height) * 100
-            }
-          });
-        }
-        currentBlock = {
-          text: str,
-          isHeading: isLargeFont,
-          lastY: y,
-          lastX: x + (item.width || 0),
-          height: fontHeight,
-          x: x,
-          y: y,
-          width: item.width || 50
+    for (const item of rawItems) {
+      if (!currentLine || Math.abs(item.y - currentLine.y) > Math.max(3.5, item.height * 0.4)) {
+        if (currentLine) lines.push(currentLine);
+        currentLine = {
+          y: item.y,
+          height: item.height,
+          items: [item]
         };
       } else {
-        currentBlock.text += (currentBlock.text ? ' ' : '') + str;
-        currentBlock.lastY = y;
-        currentBlock.lastX = x + (item.width || 0);
-        currentBlock.width = Math.max(currentBlock.width, (x + (item.width || 0)) - currentBlock.x);
-        currentBlock.isHeading = currentBlock.isHeading || isLargeFont;
+        currentLine.items.push(item);
+        currentLine.height = Math.max(currentLine.height, item.height);
       }
     }
+    if (currentLine) lines.push(currentLine);
 
-    if (currentBlock.text.trim()) {
+    // Step 4: Within each line, cluster adjacent words into cells/segments
+    // Detect column boundaries: if two items have gap > max(20, fontH * 1.5), they belong to different columns!
+    const structuredLines = lines.map(line => {
+      line.items.sort((a, b) => a.x - b.x);
+      const cells = [];
+      let currentCell = null;
+
+      for (const item of line.items) {
+        const itemStr = item.str;
+        if (!currentCell) {
+          currentCell = {
+            text: itemStr,
+            x: item.x,
+            y: item.y,
+            width: item.width,
+            height: item.height,
+            endX: item.x + item.width
+          };
+        } else {
+          const gap = item.x - currentCell.endX;
+          // Substantial horizontal gap means a new table cell/column!
+          if (gap > Math.max(20, item.height * 1.5)) {
+            cells.push({
+              text: currentCell.text.trim(),
+              x: currentCell.x,
+              y: currentCell.y,
+              width: currentCell.width,
+              height: currentCell.height
+            });
+            currentCell = {
+              text: itemStr,
+              x: item.x,
+              y: item.y,
+              width: item.width,
+              height: item.height,
+              endX: item.x + item.width
+            };
+          } else {
+            // Same cell/phrase: append space if needed
+            const needsSpace = !currentCell.text.endsWith(' ') && !itemStr.startsWith(' ');
+            currentCell.text += (needsSpace ? ' ' : '') + itemStr;
+            currentCell.width = (item.x + item.width) - currentCell.x;
+            currentCell.endX = item.x + item.width;
+            currentCell.height = Math.max(currentCell.height, item.height);
+          }
+        }
+      }
+      if (currentCell && currentCell.text.trim()) {
+        cells.push({
+          text: currentCell.text.trim(),
+          x: currentCell.x,
+          y: currentCell.y,
+          width: currentCell.width,
+          height: currentCell.height
+        });
+      }
+      return {
+        y: line.y,
+        height: line.height,
+        cells
+      };
+    });
+
+    // Step 5: Group lines into Structural Blocks (Tables, Bullet points, Headings, Paragraphs)
+    const blocks = [];
+    let i = 0;
+
+    // Bullet detection regex
+    const bulletRegex = /^(\x95|[\u2022\u25cf\u25cb\u25a0\u25aa\u25ba\u2192\-\*–—]|(\d+|[a-zA-Z]|\([0-9a-zA-Z]+\))[\.\)])\s*(.*)$/;
+
+    while (i < structuredLines.length) {
+      const line = structuredLines[i];
+
+      // Check for Table: 2 or more cells in this line
+      if (line.cells.length >= 2) {
+        // Look ahead to see if subsequent lines also have 2+ cells
+        const tableLines = [line];
+        let j = i + 1;
+        while (j < structuredLines.length) {
+          const nextLine = structuredLines[j];
+          const verticalGap = nextLine.y - tableLines[tableLines.length - 1].y;
+
+          // If too far vertically, table ends
+          if (verticalGap > 45 || verticalGap > (line.height * 3.5)) break;
+
+          if (nextLine.cells.length >= 2) {
+            tableLines.push(nextLine);
+            j++;
+          } else {
+            break;
+          }
+        }
+
+        // If we found at least 2 consecutive multi-cell lines, it's a TABLE!
+        if (tableLines.length >= 2) {
+          const rows = tableLines.map(l => {
+            return l.cells.map(c => ({
+              text: c.text,
+              translation: '',
+              box: {
+                x: (c.x / viewport.width) * 100,
+                y: (c.y / viewport.height) * 100,
+                width: (c.width / viewport.width) * 100,
+                height: (c.height / viewport.height) * 100
+              }
+            }));
+          });
+
+          const tableX = Math.min(...tableLines.flatMap(l => l.cells.map(c => c.x)));
+          const tableY = tableLines[0].y;
+          const tableMaxX = Math.max(...tableLines.flatMap(l => l.cells.map(c => c.x + c.width)));
+          const tableMaxY = tableLines[tableLines.length - 1].y + tableLines[tableLines.length - 1].height;
+
+          blocks.push({
+            type: 'table',
+            rows,
+            box: {
+              x: (tableX / viewport.width) * 100,
+              y: (tableY / viewport.height) * 100,
+              width: ((tableMaxX - tableX) / viewport.width) * 100,
+              height: ((tableMaxY - tableY) / viewport.height) * 100
+            }
+          });
+
+          i = j;
+          continue;
+        }
+      }
+
+      // Check for List Item (Bullet point or Numbered point)
+      const fullLineText = line.cells.map(c => c.text).join(' ');
+      const bulletMatch = fullLineText.match(bulletRegex);
+
+      if (bulletMatch) {
+        const bulletMarker = bulletMatch[1];
+        const contentText = bulletMatch[3].trim();
+        const firstCell = line.cells[0];
+
+        blocks.push({
+          type: 'list_item',
+          bullet: bulletMarker,
+          text: contentText || fullLineText,
+          originalFullText: fullLineText,
+          translation: '',
+          box: {
+            x: (firstCell.x / viewport.width) * 100,
+            y: (firstCell.y / viewport.height) * 100,
+            width: (line.cells.reduce((sum, c) => sum + c.width, 0) / viewport.width) * 100,
+            height: (line.height / viewport.height) * 100
+          }
+        });
+        i++;
+        continue;
+      }
+
+      // Check for Heading
+      const isHeading = line.height >= 13 || (line.height > 11 && line.cells.length === 1 && fullLineText.length < 75);
+      if (isHeading) {
+        const firstCell = line.cells[0];
+        blocks.push({
+          type: 'heading',
+          level: line.height > 15 ? 1 : 2,
+          text: fullLineText,
+          translation: '',
+          box: {
+            x: (firstCell.x / viewport.width) * 100,
+            y: (firstCell.y / viewport.height) * 100,
+            width: (line.cells.reduce((sum, c) => sum + c.width, 0) / viewport.width) * 100,
+            height: (line.height / viewport.height) * 100
+          }
+        });
+        i++;
+        continue;
+      }
+
+      // Standard Paragraph: merge adjacent body lines
+      let paragraphText = fullLineText;
+      let startLine = line;
+      let lastLine = line;
+      let j = i + 1;
+
+      while (j < structuredLines.length) {
+        const nextLine = structuredLines[j];
+        const verticalGap = nextLine.y - lastLine.y;
+        const nextText = nextLine.cells.map(c => c.text).join(' ');
+
+        // Stop paragraph if next line is table, bullet, heading, or large vertical gap
+        if (nextLine.cells.length >= 2 || nextText.match(bulletRegex) || nextLine.height >= 13 || verticalGap > (line.height * 2.2)) {
+          break;
+        }
+
+        paragraphText += ' ' + nextText;
+        lastLine = nextLine;
+        j++;
+      }
+
       blocks.push({
-        text: currentBlock.text.trim(),
-        isHeading: currentBlock.isHeading,
+        type: 'paragraph',
+        text: paragraphText.trim(),
+        translation: '',
         box: {
-          x: (currentBlock.x / viewport.width) * 100,
-          y: ((viewport.height - currentBlock.y) / viewport.height) * 100,
-          width: (currentBlock.width / viewport.width) * 100,
-          height: (currentBlock.height / viewport.height) * 100
+          x: (startLine.cells[0].x / viewport.width) * 100,
+          y: (startLine.y / viewport.height) * 100,
+          width: 90,
+          height: ((lastLine.y + lastLine.height - startLine.y) / viewport.height) * 100
         }
       });
+
+      i = j;
     }
 
     return blocks;
   }
 
-  // Translate a single page
+  // Translate a single page preserving full layout & table structure
   async translatePage(pageNum) {
     if (!this.pdfDoc) return;
     const translatedContent = document.getElementById(`translated-content-${pageNum}`);
@@ -681,7 +861,7 @@ class PolyGlotViewer {
     }
 
     try {
-      const blocks = await this.extractPageParagraphs(pageNum);
+      const blocks = await this.extractPageStructure(pageNum);
       if (blocks.length === 0) {
         if (translatedContent) {
           translatedContent.innerHTML = `<div class="translated-empty"><span>No text detected on page ${pageNum}.</span></div>`;
@@ -689,7 +869,46 @@ class PolyGlotViewer {
         return;
       }
 
-      const texts = blocks.map(b => b.text);
+      // Collect all text items to translate, preserving references
+      const translationRequests = [];
+
+      blocks.forEach((block) => {
+        if (block.type === 'table') {
+          block.rows.forEach((row) => {
+            row.forEach((cell) => {
+              if (cell.text && cell.text.trim()) {
+                translationRequests.push({
+                  text: cell.text.trim(),
+                  apply: (trans) => { cell.translation = trans; }
+                });
+              } else {
+                cell.translation = cell.text;
+              }
+            });
+          });
+        } else if (block.type === 'list_item') {
+          if (block.text && block.text.trim()) {
+            translationRequests.push({
+              text: block.text.trim(),
+              apply: (trans) => { block.translation = trans; }
+            });
+          } else {
+            block.translation = block.originalFullText;
+          }
+        } else {
+          // heading or paragraph
+          if (block.text && block.text.trim()) {
+            translationRequests.push({
+              text: block.text.trim(),
+              apply: (trans) => { block.translation = trans; }
+            });
+          } else {
+            block.translation = block.text;
+          }
+        }
+      });
+
+      const texts = translationRequests.map(r => r.text);
       const res = await chrome.runtime.sendMessage({
         action: 'BATCH_TRANSLATE',
         texts,
@@ -700,12 +919,14 @@ class PolyGlotViewer {
 
       if (res && res.success && Array.isArray(res.translations)) {
         res.translations.forEach((t, i) => {
-          blocks[i].translation = t.translation || blocks[i].text;
+          if (translationRequests[i]) {
+            translationRequests[i].apply(t.translation || translationRequests[i].text);
+          }
         });
 
         this.translations.set(pageNum, {
           blocks,
-          fullText: blocks.map(b => b.translation).join('\n\n')
+          fullText: this.buildTextRepresentation(blocks)
         });
 
         this.renderTranslatedPageUI(pageNum, blocks);
@@ -715,7 +936,7 @@ class PolyGlotViewer {
         if (thumbBadge) thumbBadge.style.display = 'inline';
 
         chrome.runtime.sendMessage({ action: 'INCREMENT_PAGE_COUNT' });
-        this.showToast(`Page ${pageNum} translated successfully!`);
+        this.showToast(`Page ${pageNum} translated with tables & layout preserved!`);
       } else {
         throw new Error(res ? res.error : 'Translation failed');
       }
@@ -733,7 +954,7 @@ class PolyGlotViewer {
     }
   }
 
-  // Render the translated blocks into the UI
+  // Render the translated blocks into the UI maintaining original structure
   renderTranslatedPageUI(pageNum, blocks) {
     const translatedContent = document.getElementById(`translated-content-${pageNum}`);
     const overlayLayer = document.getElementById(`overlay-layer-${pageNum}`);
@@ -741,38 +962,167 @@ class PolyGlotViewer {
     if (translatedContent) {
       translatedContent.innerHTML = '';
       blocks.forEach((block) => {
-        if (this.activeMode === 'bilingual') {
-          const pair = document.createElement('div');
-          pair.className = 'bilingual-pair';
-          pair.innerHTML = `
-            <div class="bilingual-original">${this.escapeHtml(block.text)}</div>
-            <div class="bilingual-translated">${this.escapeHtml(block.translation)}</div>
-          `;
-          translatedContent.appendChild(pair);
+        if (block.type === 'table') {
+          // Render Table
+          const tableWrapper = document.createElement('div');
+          tableWrapper.className = 'translated-table-wrapper';
+          
+          let tableHtml = '<table class="translated-table">';
+          if (block.rows.length > 0) {
+            // Header Row (Row 0)
+            tableHtml += '<thead><tr>';
+            block.rows[0].forEach(cell => {
+              const content = cell.translation || cell.text;
+              if (this.activeMode === 'bilingual') {
+                tableHtml += `<th><div class="bilingual-cell"><span class="bilingual-cell-orig">${this.escapeHtml(cell.text)}</span><span class="bilingual-cell-trans">${this.escapeHtml(content)}</span></div></th>`;
+              } else {
+                tableHtml += `<th>${this.escapeHtml(content)}</th>`;
+              }
+            });
+            tableHtml += '</tr></thead>';
+
+            // Body Rows (Rows 1..N)
+            tableHtml += '<tbody>';
+            for (let r = 1; r < block.rows.length; r++) {
+              tableHtml += '<tr>';
+              block.rows[r].forEach(cell => {
+                const content = cell.translation || cell.text;
+                if (this.activeMode === 'bilingual') {
+                  tableHtml += `<td><div class="bilingual-cell"><span class="bilingual-cell-orig">${this.escapeHtml(cell.text)}</span><span class="bilingual-cell-trans">${this.escapeHtml(content)}</span></div></td>`;
+                } else {
+                  tableHtml += `<td>${this.escapeHtml(content)}</td>`;
+                }
+              });
+              tableHtml += '</tr>';
+            }
+            tableHtml += '</tbody>';
+          }
+          tableHtml += '</table>';
+          tableWrapper.innerHTML = tableHtml;
+          translatedContent.appendChild(tableWrapper);
+
+        } else if (block.type === 'list_item') {
+          // Render Bullet or Numbered List Item
+          const itemEl = document.createElement('div');
+          itemEl.className = 'translated-list-item';
+          const content = block.translation || block.text;
+
+          if (this.activeMode === 'bilingual') {
+            itemEl.innerHTML = `
+              <span class="bullet-marker">${this.escapeHtml(block.bullet)}</span>
+              <div class="bilingual-pair" style="flex: 1; padding: 4px 8px;">
+                <div class="bilingual-original">${this.escapeHtml(block.text || block.originalFullText)}</div>
+                <div class="bilingual-translated">${this.escapeHtml(content)}</div>
+              </div>
+            `;
+          } else {
+            itemEl.innerHTML = `
+              <span class="bullet-marker">${this.escapeHtml(block.bullet)}</span>
+              <span class="list-item-content">${this.escapeHtml(content)}</span>
+            `;
+          }
+          translatedContent.appendChild(itemEl);
+
+        } else if (block.type === 'heading') {
+          // Render Heading
+          const headEl = document.createElement('h3');
+          headEl.className = `translated-heading ${block.level === 1 ? 'is-title' : ''}`;
+          const content = block.translation || block.text;
+
+          if (this.activeMode === 'bilingual') {
+            headEl.innerHTML = `
+              <div class="bilingual-pair" style="width: 100%;">
+                <div class="bilingual-original" style="font-size: 13px;">${this.escapeHtml(block.text)}</div>
+                <div class="bilingual-translated">${this.escapeHtml(content)}</div>
+              </div>
+            `;
+          } else {
+            headEl.textContent = content;
+          }
+          translatedContent.appendChild(headEl);
+
         } else {
-          const div = document.createElement('div');
-          div.className = `translated-block ${block.isHeading ? 'is-heading' : ''}`;
-          div.textContent = block.translation;
-          translatedContent.appendChild(div);
+          // Standard Paragraph
+          const content = block.translation || block.text;
+          if (this.activeMode === 'bilingual') {
+            const pair = document.createElement('div');
+            pair.className = 'bilingual-pair';
+            pair.innerHTML = `
+              <div class="bilingual-original">${this.escapeHtml(block.text)}</div>
+              <div class="bilingual-translated">${this.escapeHtml(content)}</div>
+            `;
+            translatedContent.appendChild(pair);
+          } else {
+            const p = document.createElement('p');
+            p.className = 'translated-paragraph';
+            p.textContent = content;
+            translatedContent.appendChild(p);
+          }
         }
       });
     }
 
-    // Render Overlay Chips
+    // Render Overlay Chips in Overlay Mode
     if (overlayLayer) {
       overlayLayer.innerHTML = '';
       blocks.forEach(block => {
-        if (!block.box) return;
-        const chip = document.createElement('div');
-        chip.className = 'overlay-chip';
-        chip.textContent = block.translation;
-        chip.title = `Original: ${block.text}`;
-        chip.style.left = `${Math.max(2, block.box.x)}%`;
-        chip.style.top = `${Math.max(2, block.box.y)}%`;
-        chip.style.maxWidth = `${Math.min(94, block.box.width + 10)}%`;
-        overlayLayer.appendChild(chip);
+        if (block.type === 'table') {
+          // Place overlay chips for EACH table cell in the exact cell bounding box
+          block.rows.forEach(row => {
+            row.forEach(cell => {
+              if (!cell.box) return;
+              const chip = document.createElement('div');
+              chip.className = 'overlay-chip';
+              chip.textContent = cell.translation || cell.text;
+              chip.title = `Original: ${cell.text}`;
+              chip.style.left = `${Math.max(1, cell.box.x)}%`;
+              chip.style.top = `${Math.max(1, cell.box.y)}%`;
+              chip.style.maxWidth = `${Math.min(95, cell.box.width + 12)}%`;
+              overlayLayer.appendChild(chip);
+            });
+          });
+        } else if (block.type === 'list_item') {
+          if (!block.box) return;
+          const chip = document.createElement('div');
+          chip.className = 'overlay-chip';
+          chip.textContent = `${block.bullet} ${block.translation || block.text}`;
+          chip.title = `Original: ${block.originalFullText || block.text}`;
+          chip.style.left = `${Math.max(1, block.box.x)}%`;
+          chip.style.top = `${Math.max(1, block.box.y)}%`;
+          chip.style.maxWidth = `${Math.min(95, block.box.width + 8)}%`;
+          overlayLayer.appendChild(chip);
+        } else {
+          if (!block.box) return;
+          const chip = document.createElement('div');
+          chip.className = 'overlay-chip';
+          chip.textContent = block.translation || block.text;
+          chip.title = `Original: ${block.text}`;
+          chip.style.left = `${Math.max(1, block.box.x)}%`;
+          chip.style.top = `${Math.max(1, block.box.y)}%`;
+          chip.style.maxWidth = `${Math.min(95, block.box.width + 10)}%`;
+          overlayLayer.appendChild(chip);
+        }
       });
     }
+  }
+
+  buildTextRepresentation(blocks) {
+    let out = '';
+    blocks.forEach(b => {
+      if (b.type === 'table') {
+        b.rows.forEach(row => {
+          out += row.map(c => (c.translation || c.text)).join('\t') + '\n';
+        });
+        out += '\n';
+      } else if (b.type === 'list_item') {
+        out += `${b.bullet} ${b.translation || b.text}\n`;
+      } else if (b.type === 'heading') {
+        out += `${b.translation || b.text}\n\n`;
+      } else {
+        out += `${b.translation || b.text}\n\n`;
+      }
+    });
+    return out.trim();
   }
 
   updateAllRenderedTranslatedPanes() {
@@ -988,10 +1338,21 @@ class PolyGlotViewer {
         if (data) {
           fullOutput += `## Page ${p}\n\n`;
           data.blocks.forEach(b => {
-            if (b.isHeading) {
-              fullOutput += `### ${b.translation}\n\n`;
+            if (b.type === 'table') {
+              if (b.rows && b.rows.length > 0) {
+                fullOutput += '| ' + b.rows[0].map(c => (c.translation || c.text)).join(' | ') + ' |\n';
+                fullOutput += '| ' + b.rows[0].map(() => '---').join(' | ') + ' |\n';
+                for (let r = 1; r < b.rows.length; r++) {
+                  fullOutput += '| ' + b.rows[r].map(c => (c.translation || c.text)).join(' | ') + ' |\n';
+                }
+                fullOutput += '\n';
+              }
+            } else if (b.type === 'list_item') {
+              fullOutput += `${b.bullet} ${b.translation || b.text}\n`;
+            } else if (b.type === 'heading') {
+              fullOutput += (b.level === 1 ? '### ' : '#### ') + (b.translation || b.text) + '\n\n';
             } else {
-              fullOutput += `${b.translation}\n\n`;
+              fullOutput += (b.translation || b.text) + '\n\n';
             }
           });
         }
